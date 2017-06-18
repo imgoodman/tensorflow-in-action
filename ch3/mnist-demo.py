@@ -89,3 +89,7 @@ print(accuracy.eval({x:mnist.test.images, y_:mnist.test.labels}))
 #注意：
 #tensorflow和spark类似，定义的各个公式其实只是计算图computation graph
 #在执行代码时候，计算还没有实际发生，只有等调用run方法，并且feed数据时候，计算才真正执行
+
+
+######逐层预训练来初始化权重（因为bp会导致梯度扩散）
+#神经网络的最大价值在于对特征的自动提取和抽象，免去聊人工提取特征的烦琐，可以自动找出复杂且有效的高阶特征
