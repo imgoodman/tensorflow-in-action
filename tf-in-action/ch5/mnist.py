@@ -28,6 +28,20 @@ TRAINING_STEPS=30000
 #滑动平均衰减率
 MOVING_AVERAGE_DECAY=0.99
 
+"""
+根据传进来的reuse参数来判断是创建新变量 还是使用已经创建好的
+第一次构造网络时候，需要创建新变量
+"""
+def inference2(input_tensor, reuse=False):
+    with tf.variable_scope("layer1", reuse=reuse):
+        weights=tf.get_variable("weights",shape=[INPUT_NODE, LAYER1_NODE], initializer=tf.truncated_normal_initializer(stddev=0.1))
+        biases=tf.get_variable("biases", shape=[LAYER1_NODE], initializer=tf.constant_initializer(0.1))
+        layer1=tf.nn.relu(tf.matmul(input_tensor, weights)+biases)
+    with tf.variable_scope("layer2", reuse=reuse):
+        weights=tf.get_variable("weights", shape=[LAYER1_NODE, OUTPUT_NODE], initializer=tf.truncated_normal_initializer(stddev=0.1))
+        biases=tf.get_variable("biases", shape=[OUTPUT_NODE], initializer=tf.constant_initializer(0.1))
+        layer2=tf.matmul(layer1, weights) + biases
+    return layer2
 
 def inference(input_tensor, avg_class, weights1, biases1, weights2, biases2):
     if avg_class is None:
@@ -57,7 +71,7 @@ def train(mnist):
     variables_averages_op=ema.apply(tf.trainable_variables())
     #计算使用了滑动平均之后的前向传播结果
     #滑动平均不会改变变量本身的取值 而是维护一个影子变量来记录其滑动平均值。所以当需要使用这个滑动平均值的时候，需要明确调用average函数
-    average_y=inference(x, variable_averages, weights1, biases1, weights2, biases2)
+    average_y=inference(x, ema, weights1, biases1, weights2, biases2)
     #第一个参数是神经网络的前向传播结果
     #第二个参数是训练数据的正确答案的数字（所以要用tf.argmax）
     cross_entropy=tf.nn.sparse_softmax_cross_entropy_with_logits(logits=y, labels=tf.argmax(y_,1))
@@ -88,9 +102,11 @@ def train(mnist):
         validate_feed={x:mnist.validation.images, y_:mnist.validation.labels}
         test_feed={x:mnist.test.images, y_:mnist.test.labels}
         for i in range(TRAINING_STEPS):
-            if i%100==0:
+            if i%1000==0:
                 validate_accuracy=sess.run(accuracy, feed_dict=validate_feed)
                 print("after %d training steps, validation accuracy using average model is %g" % (i, validate_accuracy))
+                test_accuracy=sess.run(accuracy, feed_dict=test_feed)
+                print("after %d training steps, test accuracy using average model is %g" % (i, test_accuracy))
             xs,ys=mnist.train.next_batch(BATCH_SIZE)
             sess.run(train_op, feed_dict={x:xs, y_:ys})
         test_accuracy=sess.run(accuracy, feed_dict=test_feed)
