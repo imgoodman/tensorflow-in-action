@@ -51,32 +51,39 @@ def train(mnist):
     y=inference(x, None, weights1, biases1, weights2, biases2)
 
     global_step=tf.Variable(0, trainable=False)
-
-    variable_averages=tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY, global_step)
-
-    variables_averages_op=variable_averages.apply(tf.trainable_variables())
-
+    #初始化滑动平均类
+    ema=tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY, global_step)
+    #在所有代表神经网络参数的变量上使用滑动平均
+    variables_averages_op=ema.apply(tf.trainable_variables())
+    #计算使用了滑动平均之后的前向传播结果
+    #滑动平均不会改变变量本身的取值 而是维护一个影子变量来记录其滑动平均值。所以当需要使用这个滑动平均值的时候，需要明确调用average函数
     average_y=inference(x, variable_averages, weights1, biases1, weights2, biases2)
-
+    #第一个参数是神经网络的前向传播结果
+    #第二个参数是训练数据的正确答案的数字（所以要用tf.argmax）
     cross_entropy=tf.nn.sparse_softmax_cross_entropy_with_logits(logits=y, labels=tf.argmax(y_,1))
     cross_entropy_mean=tf.reduce_mean(cross_entropy)
-
+    #计算L2正则化损失函数
     regularizer=tf.contrib.layers.l2_regularizer(REGULARIZATION_RATE)
-
+    #计算模型的正则化损失
     regularization=regularizer(weights1)+regularizer(weights2)
+    #总得损失
     loss=cross_entropy_mean + regularization
-
+    #设置指数衰减的学习率
+    #基础学习率，当前迭代的轮数，过完所有的训练数据需要的迭代次数，学习率衰减速度
     learning_rate=tf.train.exponential_decay(LEARNING_RATE_BASE, global_step, mnist.train.num_examples/BATCH_SIZE, LEARNING_RATE_DECAY)
-
+    #在训练神经网络模型时候，每过一遍数据，既需要通过反向传播来更新网络中的参数，又要更新每一个参数的滑动平均值
+    #为了一次完成多个操作
     train_step=tf.train.GradientDescentOptimizer(learning_rate).minimize(loss, global_step=global_step)
 
     with tf.control_dependencies([train_step, variables_averages_op]):
         train_op=tf.no_op(name="train")
-
+    #tf.argmax的第二个参数“1”表示选取最大值的操作仅仅在第一个维度中进行。也就是说，只在每一行选取最大值对应的下标
+    #tf.equal判断两个张量在每一维是否相等
     correct_prediction=tf.equal(tf.argmax(average_y,1), tf.argmax(y_,1))
     accuracy=tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
     with tf.Session() as sess:
+        #初始化应该采用tf.global_variables_initializer().run()
         tf.initialize_all_variables().run()
         validate_feed={x:mnist.validation.images, y_:mnist.validation.labels}
         test_feed={x:mnist.test.images, y_:mnist.test.labels}
