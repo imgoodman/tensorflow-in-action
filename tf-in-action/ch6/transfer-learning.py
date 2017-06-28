@@ -43,7 +43,7 @@ def create_image_lists(testing_percentage, validation_percentage):
         file_list=[]
         dir_name=os.path.basename(sub_dir)
         for ext in extensions:
-            file_glob=os.path.join(INPUT_DAT, dir_name, "*."+ext)
+            file_glob=os.path.join(INPUT_DATA, dir_name, "*."+ext)
             file_list.extend(glob.glob(file_glob))
         if not file_list:
             continue
@@ -147,6 +147,54 @@ def get_test_bottlenecks(sess, image_lists, n_classes, jpeg_data_tensor, bottlen
 
 
 
-def main():
+def main(argv=None):
     image_lists=create_image_lists(TEST_PERCENTAGE, VALIDATION_PERCENTAGE)
     n_classes=len(image_lists.keys())
+
+    with gfile.FastGFile(os.path.join(MODEL_DIR, MODEL_FILE), "rb") as f:
+        graph_def=tf.GraphDef()
+        graph_def.ParseFromString(f.read())
+    bottleneck_tensor, jpeg_data_tensor=tf.import_graph_def(graph_def, return_elements=[BOTTLENECK_TENSOR_NAME, JPEG_DATA_TENSOR_NAME])
+
+    bottleneck_input=tf.placeholder(tf.float32, [None, BOTTLENECK_TENSOR_SIZE], name="BottleneckInputPlaceholder")
+
+    ground_truth_input=tf.placeholder(tf.float32, [None, n_classes], name="GroundTruthInput")
+
+    with tf.name_scope("final_training_op"):
+        weights=tf.Variable(tf.truncated_normal(shape=[BOTTLENECK_TENSOR_SIZE, n_classes], stddev=0.001))
+        biases=tf.Variable(tf.zeros([n_classes]))
+        logits=tf.matmul(bottleneck_input, weights) + biases
+        final_tensor=tf.nn.relu(logits)
+
+    cross_entropy=tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=ground_truth_input)
+    cross_entropy_mean=tf.reduce_mean(cross_entropy)
+    train_step=tf.train.GradientDescentOptimizer(LEARNING_RATE).minimize(cross_entropy_mean)
+
+
+
+    with tf.name_scope("evaluation"):
+        correct_prediction=tf.equal(tf.argmax(final_tensor, 1), tf.argmax(ground_truth_input,1))
+        evaluation_step=tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+
+    with tf.Session() as sess:
+        tf.global_variables_initializer().run()
+
+        for i in range(STEPS):
+            train_bottlenecks, train_ground_truth=get_random_cached_bottlenecks(sess, n_classes, image_lists, BATCH, "training", jpeg_data_tensor, bottleneck_tensor)
+            sess.run(train_step, feed_dict={bottleneck_input:train_bottlenecks, ground_truth_input:train_ground_truth})
+
+            if i%100==0 or i+1==STEPS:
+                validation_bottlenecks, validation_ground_truth=get_random_cached_bottlenecks(sess, n_classes, image_lists, BATCH, "validation", jpeg_data_tensor, bottleneck_tensor)
+                validation_accuracy=sess.run(evaluation_step, feed_dict={bottleneck_input:validation_bottlenecks, ground_truth_input: validation_ground_truth})
+                print("step %d: validation accuracy on random sampled %d examples= %.1f%%" % (i, BATCH, validation_accuracy*100))
+    
+        test_bottlenecks,test_ground_truth=get_test_bottlenecks(sess, image_lists, n_classes, jpeg_data_tensor, bottleneck_tensor)
+        test_accuracy=sess.run(evaluation_step, feed_dict={bottleneck_input: test_bottlenecks, ground_truth_input:test_ground_truth})
+        print("final test accuracy= %.1f%%" % (test_accuracy*100))
+
+
+
+
+if __name__=="__main__":
+    tf.app.run()
